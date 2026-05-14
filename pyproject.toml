@@ -1,0 +1,90 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "policy-as-code-engine"
+version = "0.1.0"
+description = "Declarative policy-as-code evaluator. JSON/YAML rules + Python predicates over arbitrary context objects. Enforces AI Procurement Decision Card conditions at request time."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Miz Causevic", email = "miz@kineticgain.com" },
+]
+keywords = [
+    "policy", "policy-as-code", "rules-engine", "fastapi", "ai-governance",
+    "decision-intelligence", "kinetic-gain-protocol-suite",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.7",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+dev = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML>=6.0",
+]
+
+[project.scripts]
+policy-eval = "policy_as_code_engine.__main__:main"
+
+[project.urls]
+Homepage      = "https://github.com/mizcausevic-dev/policy-as-code-engine"
+Repository    = "https://github.com/mizcausevic-dev/policy-as-code-engine"
+Issues        = "https://github.com/mizcausevic-dev/policy-as-code-engine/issues"
+"Decision Card spec" = "https://github.com/mizcausevic-dev/ai-procurement-decision-spec"
+"Author Site" = "https://kineticgain.com/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/policy_as_code_engine"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore::DeprecationWarning:fastapi.*",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+ignore_missing_imports = false

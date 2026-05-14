@@ -1,0 +1,53 @@
+bundle_id: edu-vendor-gate
+version: "0.1.0"
+description: "Two-policy gate: admin-only writes, plus a global block for suspended subjects."
+
+policies:
+  - id: writes-require-admin
+    description: "Mutating actions require an admin role."
+    default_effect: allow
+    rules:
+      - id: non-write-passthrough
+        effect: allow
+        description: "GET-like actions don't require admin."
+        when:
+          kind: in
+          field: action
+          value: ["read", "list", "get"]
+      - id: admin-write-allowed
+        effect: allow
+        when:
+          kind: all_of
+          matchers:
+            - kind: in
+              field: action
+              value: ["create", "update", "delete"]
+            - kind: eq
+              field: subject.role
+              value: admin
+      - id: non-admin-write-denied
+        effect: deny
+        description: "Writes by non-admins are blocked."
+        when:
+          kind: any_of
+          matchers:
+            - kind: eq
+              field: action
+              value: create
+            - kind: eq
+              field: action
+              value: update
+            - kind: eq
+              field: action
+              value: delete
+
+  - id: deny-suspended
+    description: "Suspended subjects are blocked outright."
+    default_effect: allow
+    rules:
+      - id: suspended-deny
+        effect: deny
+        when:
+          kind: eq
+          field: subject.suspended
+          value: true

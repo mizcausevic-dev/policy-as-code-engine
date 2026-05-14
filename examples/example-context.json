@@ -1,0 +1,13 @@
+{
+  "subject": {
+    "id": "u-42",
+    "role": "admin",
+    "suspended": false
+  },
+  "action": "update",
+  "resource": {
+    "id": "doc-7",
+    "kind": "lesson-plan"
+  },
+  "data": {}
+}
