@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "policy-as-code-engine"
-version = "0.1.0"
-description = "Declarative policy-as-code evaluator. JSON/YAML rules + Python predicates over arbitrary context objects. Enforces AI Procurement Decision Card conditions at request time."
+version = "0.1.1"
+description = "Declarative policy-as-code evaluator. JSON/YAML rules + Python predicates over arbitrary context objects. Enforces AI Procurement Decision Card conditions at request time. Optional audit-stream-py integration via AUDIT_STREAM_URL."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -31,6 +31,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "httpx>=0.27",
     "pydantic>=2.7",
     "PyYAML>=6.0",
 ]

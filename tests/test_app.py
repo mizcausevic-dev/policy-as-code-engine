@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -11,7 +14,7 @@ from policy_as_code_engine.app import app
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client() -> Iterator[TestClient]:
     with TestClient(app) as c:
         yield c
 
@@ -191,3 +194,122 @@ class TestDecisionCardBridge:
     def test_invalid_card_400(self, client: TestClient) -> None:
         r = client.post("/bundles/from-decision-card", json={"decision_id": "x"})
         assert r.status_code == 400
+
+
+class TestAuditStreamWiring:
+    """The four endpoints that emit governance events must do so when
+    AUDIT_STREAM_URL is set, and stay silent when it isn't."""
+
+    def _emit_capture(self, monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dict[str, Any]]]:
+        monkeypatch.setenv("AUDIT_STREAM_URL", "http://audit.local")
+        captured: list[dict[str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(201, json={"event_id": len(captured)})
+
+        # Spin up the lifespan first so app.state.http_client exists,
+        # then swap it for one backed by MockTransport.
+        c = TestClient(app)
+        c.__enter__()
+        app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return c, captured
+
+    def test_register_emits_policy_bundle_registered(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c, captured = self._emit_capture(monkeypatch)
+        try:
+            r = c.post("/bundles", json=_simple_bundle("audit-reg"))
+            assert r.status_code == 201
+        finally:
+            c.__exit__(None, None, None)
+        kinds = [e["kind"] for e in captured]
+        assert "policy_bundle_registered" in kinds
+        evt = next(e for e in captured if e["kind"] == "policy_bundle_registered")
+        assert evt["source"] == "policy-as-code-engine"
+        assert evt["payload"]["bundle_id"] == "audit-reg"
+        assert evt["payload"]["policy_count"] == 1
+
+    def test_evaluate_allow_emits_request_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c, captured = self._emit_capture(monkeypatch)
+        try:
+            c.post("/bundles", json=_simple_bundle("audit-ev"))
+            captured.clear()  # drop registration event so we only see the evaluate event
+            r = c.post(
+                "/bundles/audit-ev/evaluate",
+                json={
+                    "subject": {"role": "admin"},
+                    "data": {},
+                    "resource": None,
+                    "action": None,
+                },
+            )
+            assert r.status_code == 200
+        finally:
+            c.__exit__(None, None, None)
+        assert any(e["kind"] == "request_allowed" for e in captured)
+
+    def test_evaluate_deny_emits_request_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c, captured = self._emit_capture(monkeypatch)
+        try:
+            c.post("/bundles", json=_simple_bundle("audit-deny"))
+            captured.clear()
+            r = c.post(
+                "/bundles/audit-deny/evaluate",
+                json={
+                    "subject": {"role": "viewer"},
+                    "data": {},
+                    "resource": None,
+                    "action": None,
+                },
+            )
+            assert r.status_code == 200
+        finally:
+            c.__exit__(None, None, None)
+        assert any(e["kind"] == "request_denied" for e in captured)
+
+    def test_oneshot_evaluate_emits_decision(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c, captured = self._emit_capture(monkeypatch)
+        try:
+            r = c.post(
+                "/evaluate",
+                json={
+                    "bundle": _simple_bundle("oneshot-aud"),
+                    "context": {
+                        "subject": {"role": "admin"},
+                        "data": {},
+                        "resource": None,
+                        "action": None,
+                    },
+                },
+            )
+            assert r.status_code == 200
+        finally:
+            c.__exit__(None, None, None)
+        assert any(e["kind"] == "request_allowed" for e in captured)
+
+    def test_from_decision_card_emits_registration(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        c, captured = self._emit_capture(monkeypatch)
+        try:
+            r = c.post("/bundles/from-decision-card", json=_decision_card())
+            assert r.status_code == 201
+        finally:
+            c.__exit__(None, None, None)
+        assert any(e["kind"] == "policy_bundle_registered" for e in captured)
+
+    def test_no_emit_when_audit_stream_url_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AUDIT_STREAM_URL", raising=False)
+        captured: list[dict[str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(201)
+
+        c = TestClient(app)
+        c.__enter__()
+        try:
+            app.state.http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            r = c.post("/bundles", json=_simple_bundle("audit-off"))
+            assert r.status_code == 201
+        finally:
+            c.__exit__(None, None, None)
+        assert captured == []
