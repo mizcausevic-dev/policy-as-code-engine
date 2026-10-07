@@ -2,7 +2,7 @@
 Entry point. Either run the HTTP API or evaluate a bundle from the CLI.
 
     # API
-    python -m policy_as_code_engine                          # binds 0.0.0.0:8089
+    python -m policy_as_code_engine                          # binds 127.0.0.1:8089
 
     # CLI eval
     python -m policy_as_code_engine eval bundle.yaml ctx.json
@@ -24,7 +24,7 @@ def _serve() -> None:
     import uvicorn
 
     port = int(os.environ.get("PORT", "8089"))
-    host = os.environ.get("HOST", "0.0.0.0")
+    host = os.environ.get("HOST", "127.0.0.1")
     uvicorn.run("policy_as_code_engine.app:app", host=host, port=port, log_level="info")
 
 

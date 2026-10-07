@@ -1,11 +1,11 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [project]
 name = "policy-as-code-engine"
-version = "0.1.1"
-description = "Declarative policy-as-code evaluator. JSON/YAML rules + Python predicates over arbitrary context objects. Enforces AI Procurement Decision Card conditions at request time. Optional audit-stream-py integration via AUDIT_STREAM_URL."
+version = "0.2.0"
+description = "Declarative policy evaluator with Decision Card field conversion and optional best-effort audit events."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -31,9 +31,12 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "cryptography>=50.0.2,<51",
     "httpx>=0.27",
     "pydantic>=2.7",
     "PyYAML>=6.0",
+    "regex>=2024.11.6,<2027",
+    "rfc8785>=0.1.4,<0.2",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +53,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-PyYAML>=6.0",
+    "types-regex>=2024.11.6",
 ]
 
 [project.scripts]
@@ -64,6 +68,9 @@ Issues        = "https://github.com/mizcausevic-dev/policy-as-code-engine/issues
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/policy_as_code_engine"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "tests", "examples", "LICENSE", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

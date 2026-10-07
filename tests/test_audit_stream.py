@@ -43,6 +43,10 @@ class TestConfig:
         monkeypatch.setenv("AUDIT_STREAM_TIMEOUT_S", "not-a-number")
         assert audit_stream.timeout_s() == audit_stream.DEFAULT_TIMEOUT_S
 
+    def test_timeout_nonfinite_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AUDIT_STREAM_TIMEOUT_S", "inf")
+        assert audit_stream.timeout_s() == audit_stream.DEFAULT_TIMEOUT_S
+
 
 class TestEmit:
     @pytest.mark.asyncio
@@ -123,9 +127,7 @@ class TestEmit:
             # Must not raise.
             await audit_stream.emit(client, kind="request_denied", payload={})
         out = capsys.readouterr().out
-        # Some error message was logged; specific text isn't asserted to keep
-        # the test resilient to format tweaks.
-        assert "audit-stream emit failed" in out or True
+        assert "audit-stream emit failed" in out
 
     @pytest.mark.asyncio
     async def test_emit_swallows_connection_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,6 +140,19 @@ class TestEmit:
         async with httpx.AsyncClient(transport=transport) as client:
             # Must not raise.
             await audit_stream.emit(client, kind="request_allowed", payload={})
+
+    @pytest.mark.asyncio
+    async def test_emit_failure_does_not_log_url(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setenv("AUDIT_STREAM_URL", "http://audit.local/private-path")
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("private-path")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await audit_stream.emit(client, kind="request_denied", payload={})
+        assert "private-path" not in capsys.readouterr().out
 
     @pytest.mark.asyncio
     async def test_emit_respects_configured_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:

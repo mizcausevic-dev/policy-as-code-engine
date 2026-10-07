@@ -36,6 +36,14 @@ class TestFieldMatcher:
         with pytest.raises(ValidationError):
             FieldMatcher(kind="eq", field="x")
 
+    def test_invalid_regex_is_rejected_at_validation(self) -> None:
+        with pytest.raises(ValidationError, match="invalid regex"):
+            FieldMatcher(kind="regex", field="x", value="[")
+
+    def test_oversized_regex_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="256 characters"):
+            FieldMatcher(kind="regex", field="x", value="a" * 257)
+
 
 class TestCompositeMatchers:
     def test_all_of_requires_children(self) -> None:
@@ -65,6 +73,13 @@ class TestRuleAndPolicy:
     def test_policy_requires_at_least_one_rule(self) -> None:
         with pytest.raises(ValidationError):
             Policy(id="p", rules=[])
+
+    def test_excessive_matcher_depth_is_rejected(self) -> None:
+        matcher: dict[str, object] = {"kind": "always"}
+        for _ in range(17):
+            matcher = {"kind": "not", "matcher": matcher}
+        with pytest.raises(ValidationError, match="depth or node limit"):
+            Policy.model_validate({"id": "deep", "rules": [{"id": "r", "effect": "allow", "when": matcher}]})
 
     def test_bundle_strict_extras_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -123,3 +138,8 @@ class TestEvaluationContext:
         assert ctx.lookup("subject.role") == "admin"
         assert ctx.lookup("action") == "read"
         assert ctx.lookup("resource.id") == "doc-42"
+
+    def test_lookup_escaped_path_segments(self) -> None:
+        ctx = EvaluationContext(data={"conditions_satisfied": {"risk.review": True, "risk\\review": False}})
+        assert ctx.lookup(r"conditions_satisfied.risk\.review") is True
+        assert ctx.lookup(r"conditions_satisfied.risk\\review") is False

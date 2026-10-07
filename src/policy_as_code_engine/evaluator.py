@@ -14,8 +14,10 @@ without requiring the rule author to know about the sentinel.
 
 from __future__ import annotations
 
-import re
+from datetime import UTC, datetime
 from typing import Any
+
+import regex
 
 from .models import (
     _MISSING,
@@ -41,9 +43,33 @@ class PolicyEvaluator:
 
     def __init__(self) -> None:
         # Compiled-regex cache so repeated evaluations don't pay the parse cost.
-        self._regex_cache: dict[str, re.Pattern[str]] = {}
+        self._regex_cache: dict[str, regex.Pattern[str]] = {}
 
     def evaluate(self, bundle: PolicyBundle, context: EvaluationContext) -> EvaluationResult:
+        now = datetime.now(UTC)
+        if bundle.effective_from is not None and now < bundle.effective_from:
+            return EvaluationResult(
+                bundle_id=bundle.bundle_id,
+                decision=Decision(kind="deny", reason="bundle is not yet effective"),
+                policy_decisions=[],
+            )
+        if bundle.effective_until is not None and now >= bundle.effective_until:
+            return EvaluationResult(
+                bundle_id=bundle.bundle_id,
+                decision=Decision(kind="deny", reason="bundle effective period has ended"),
+                policy_decisions=[],
+            )
+        scope = bundle.card_scope
+        if scope is not None and (
+            context.resource is None
+            or context.resource.get("vendor_id") != scope.vendor_id
+            or context.action not in scope.allowed_actions
+        ):
+            return EvaluationResult(
+                bundle_id=bundle.bundle_id,
+                decision=Decision(kind="deny", reason="request is outside Decision Card runtime scope"),
+                policy_decisions=[],
+            )
         policy_decisions: list[Decision] = []
         for policy in bundle.policies:
             policy_decisions.append(self._evaluate_policy(policy, context))
@@ -51,6 +77,8 @@ class PolicyEvaluator:
 
     def evaluate_policy(self, policy: Policy, context: EvaluationContext) -> Decision:
         """Evaluate a single policy. Useful when callers manage bundles externally."""
+        if policy.card_derived:
+            return Decision(kind="deny", reason="Decision Card policies require bundle evaluation")
         return self._evaluate_policy(policy, context)
 
     # ---- internals -----------------------------------------------------
@@ -107,11 +135,13 @@ class PolicyEvaluator:
 
     @staticmethod
     def _eq(actual: Any, expected: Any) -> bool:
+        if isinstance(actual, bool) or isinstance(expected, bool):
+            return type(actual) is bool and type(expected) is bool and actual is expected
         return bool(actual == expected)
 
     @staticmethod
     def _ne(actual: Any, expected: Any) -> bool:
-        return bool(actual != expected)
+        return not PolicyEvaluator._eq(actual, expected)
 
     @staticmethod
     def _gt(actual: Any, expected: Any) -> bool:
@@ -160,11 +190,18 @@ class PolicyEvaluator:
     def _regex(self, actual: Any, expected: Any) -> bool:
         if not isinstance(actual, str) or not isinstance(expected, str):
             return False
+        if len(actual) > 4096:
+            return False
         pattern = self._regex_cache.get(expected)
         if pattern is None:
-            pattern = re.compile(expected)
+            pattern = regex.compile(expected)
+            if len(self._regex_cache) >= 128:
+                self._regex_cache.clear()
             self._regex_cache[expected] = pattern
-        return pattern.search(actual) is not None
+        try:
+            return pattern.search(actual, timeout=0.02) is not None
+        except TimeoutError:
+            return False
 
     @staticmethod
     def _starts_with(actual: Any, expected: Any) -> bool:

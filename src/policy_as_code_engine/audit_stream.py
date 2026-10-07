@@ -13,6 +13,7 @@ Event kinds this service emits:
                                 decision is "allow"
     request_denied              on the same endpoint when the bundle decision
                                 is "deny"
+    policy_condition_asserted   on a successful admin condition assertion
 
 Same opt-in pattern as procurement-decision-api.audit_stream and
 aeo-validator-service.audit_stream. Identical config envvars.
@@ -20,6 +21,7 @@ aeo-validator-service.audit_stream. Identical config envvars.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any
 
@@ -47,7 +49,8 @@ def timeout_s() -> float:
     if not raw:
         return DEFAULT_TIMEOUT_S
     try:
-        return max(0.1, float(raw))
+        parsed = float(raw)
+        return min(10.0, max(0.1, parsed)) if math.isfinite(parsed) else DEFAULT_TIMEOUT_S
     except ValueError:
         return DEFAULT_TIMEOUT_S
 
@@ -77,6 +80,6 @@ async def emit(
         response.raise_for_status()
     except (httpx.HTTPError, OSError) as err:
         print(
-            f"audit-stream emit failed (kind={kind}): {type(err).__name__}: {err}",
+            f"audit-stream emit failed (kind={kind}): {type(err).__name__}",
             flush=True,
         )
