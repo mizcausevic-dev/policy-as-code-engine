@@ -110,6 +110,41 @@ class TestApprovedWithConditions:
         with pytest.raises(ValueError, match="condition must carry"):
             policy_bundle_from_decision_card(card)
 
+    def test_dotted_condition_id_is_literal_key(self) -> None:
+        card = _minimal_card(
+            decision={"status": "approved-with-conditions"},
+            conditions=[{"id": "risk.review", "description": "Review completed"}],
+        )
+        bundle = policy_bundle_from_decision_card(card)
+        result = PolicyEvaluator().evaluate(
+            bundle,
+            EvaluationContext(data={"conditions_satisfied": {"risk.review": True}}),
+        )
+        assert result.decision.kind == "allow"
+
+    def test_numeric_truthy_signal_is_denied(self) -> None:
+        card = _minimal_card(
+            decision={"status": "approved-with-conditions"},
+            conditions=[{"id": "dpa-signed", "description": "DPA on file"}],
+        )
+        bundle = policy_bundle_from_decision_card(card)
+        result = PolicyEvaluator().evaluate(
+            bundle,
+            EvaluationContext(data={"conditions_satisfied": {"dpa-signed": 1}}),
+        )
+        assert result.decision.kind == "deny"
+
+    def test_duplicate_condition_id_is_rejected(self) -> None:
+        card = _minimal_card(
+            decision={"status": "approved-with-conditions"},
+            conditions=[
+                {"id": "dpa-signed", "description": "First"},
+                {"id": "dpa-signed", "description": "Second"},
+            ],
+        )
+        with pytest.raises(ValueError, match="duplicate condition id"):
+            policy_bundle_from_decision_card(card)
+
 
 class TestShapeValidation:
     def test_missing_decision_raises(self) -> None:
@@ -127,3 +162,46 @@ class TestShapeValidation:
             policy_bundle_from_decision_card(
                 {"decision_id": "x", "decision": {"status": "approved"}, "subject": {}}
             )
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"decision": None},
+            {"decision": {"status": []}},
+            {"subject": None},
+            {"conditions": {"id": "x"}},
+        ],
+    )
+    def test_wrong_types_are_rejected(self, overrides: dict[str, Any]) -> None:
+        with pytest.raises(ValueError):
+            policy_bundle_from_decision_card(_minimal_card(**overrides))
+
+    def test_approved_card_with_conditions_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="approved cards with conditions"):
+            policy_bundle_from_decision_card(
+                _minimal_card(conditions=[{"id": "dpa-signed", "description": "DPA on file"}])
+            )
+
+    @pytest.mark.parametrize("version", [None, "0.2", "0.3"])
+    def test_unsupported_card_version_is_rejected(self, version: str | None) -> None:
+        with pytest.raises(ValueError, match=r"only Decision Card version 0\.1"):
+            policy_bundle_from_decision_card(_minimal_card(decision_card_version=version))
+
+    def test_unknown_governance_field_cannot_be_silently_ignored(self) -> None:
+        with pytest.raises(ValueError, match="unsupported Decision Card fields"):
+            policy_bundle_from_decision_card(_minimal_card(data_vault_targets=[{"id": "x"}]))
+
+    def test_past_effective_until_denies_at_evaluation(self) -> None:
+        card = _minimal_card(decision={"status": "approved", "effective_until": "2020-01-01T00:00:00Z"})
+        bundle = policy_bundle_from_decision_card(card)
+        assert PolicyEvaluator().evaluate(bundle, EvaluationContext()).decision.kind == "deny"
+
+    def test_future_effective_from_denies_at_evaluation(self) -> None:
+        card = _minimal_card(decision={"status": "approved", "effective_from": "2999-01-01T00:00:00Z"})
+        bundle = policy_bundle_from_decision_card(card)
+        assert PolicyEvaluator().evaluate(bundle, EvaluationContext()).decision.kind == "deny"
+
+    def test_offset_free_effective_timestamp_is_rejected(self) -> None:
+        card = _minimal_card(decision={"status": "approved", "effective_until": "2999-01-01T00:00:00"})
+        with pytest.raises(ValueError, match="timezone"):
+            policy_bundle_from_decision_card(card)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from policy_as_code_engine.evaluator import PolicyEvaluator
@@ -9,6 +11,7 @@ from policy_as_code_engine.models import (
     AllOfMatcher,
     AlwaysMatcher,
     AnyOfMatcher,
+    Decision,
     EvaluationContext,
     FieldMatcher,
     NotMatcher,
@@ -28,6 +31,33 @@ def _allow_when(matcher: FieldMatcher | AllOfMatcher | AnyOfMatcher | NotMatcher
 
 def _deny_when(matcher: FieldMatcher | AllOfMatcher | AnyOfMatcher | NotMatcher | AlwaysMatcher) -> Rule:
     return Rule(id="r-deny", effect="deny", when=matcher)
+
+
+def test_expired_bundle_skips_policy_evaluation() -> None:
+    bundle = PolicyBundle(
+        bundle_id="expired",
+        effective_until=datetime.now(UTC) - timedelta(days=1),
+        policies=[
+            Policy(
+                id="p",
+                rules=[
+                    Rule(
+                        id="invalid-if-run",
+                        effect="allow",
+                        when=FieldMatcher(kind="regex", field="x", value="a+"),
+                    )
+                ],
+            )
+        ],
+    )
+
+    class FailingEvaluator(PolicyEvaluator):
+        def _evaluate_policy(self, _policy: Policy, _context: EvaluationContext) -> Decision:
+            raise AssertionError("expired policy must not be evaluated")
+
+    result = FailingEvaluator().evaluate(bundle, EvaluationContext())
+    assert result.decision.kind == "deny"
+    assert result.policy_decisions == []
 
 
 class TestFieldMatcherEvaluation:

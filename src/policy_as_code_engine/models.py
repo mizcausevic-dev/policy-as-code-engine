@@ -19,9 +19,10 @@ covers ~95% of real-world request gates without having to ship a parser.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -67,6 +68,13 @@ class FieldMatcher(StrictModel):
             raise ValueError(f"matcher {self.kind!r} requires a `value`")
         if self.kind in ("in", "not_in") and not isinstance(self.value, list):
             raise ValueError(f"matcher {self.kind!r} requires `value` to be a list")
+        if self.kind == "regex":
+            if not isinstance(self.value, str):
+                raise ValueError("regex matcher requires a string pattern")
+            try:
+                re.compile(self.value)
+            except re.error as err:
+                raise ValueError(f"invalid regex matcher pattern: {err}") from err
         return self
 
 
@@ -132,7 +140,19 @@ class PolicyBundle(StrictModel):
         default=None,
         description="Where the bundle came from (a Decision Card id, URL, file path).",
     )
+    effective_from: AwareDatetime | None = None
+    effective_until: AwareDatetime | None = None
     policies: list[Policy] = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def _check_effective_window(self) -> PolicyBundle:
+        if (
+            self.effective_from is not None
+            and self.effective_until is not None
+            and self.effective_until <= self.effective_from
+        ):
+            raise ValueError("effective_until must be after effective_from")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +186,7 @@ class EvaluationContext(StrictModel):
             merged["resource"] = self.resource
 
         cur: Any = merged
-        for segment in path.split("."):
+        for segment in _path_segments(path):
             if isinstance(cur, dict) and segment in cur:
                 cur = cur[segment]
             elif isinstance(cur, list):
@@ -180,6 +200,28 @@ class EvaluationContext(StrictModel):
 
 
 _MISSING: Any = object()
+
+
+def _path_segments(path: str) -> list[str]:
+    """Split dotted paths, allowing literal dots and backslashes in a key."""
+    segments: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in path:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ".":
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    if escaped:
+        current.append("\\")
+    segments.append("".join(current))
+    return segments
 
 
 class Decision(StrictModel):

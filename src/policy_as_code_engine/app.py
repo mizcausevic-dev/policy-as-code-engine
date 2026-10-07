@@ -81,7 +81,7 @@ app = FastAPI(
     version=__version__,
     description=(
         "Declarative policy-as-code evaluator. Pairs with procurement-decision-api: "
-        "drafted Decision Cards become enforceable PolicyBundles via "
+        "Decision Card fields can be converted into PolicyBundles via "
         "POST /bundles/from-decision-card."
     ),
     lifespan=_lifespan,
@@ -149,7 +149,6 @@ async def register_bundle(bundle: PolicyBundle) -> dict[str, str]:
         payload={
             "bundle_id": bundle.bundle_id,
             "policy_count": len(bundle.policies),
-            "source": bundle.source,
         },
     )
     return {"bundle_id": bundle.bundle_id, "status": "registered"}
@@ -177,7 +176,6 @@ async def _emit_decision(bundle_id: str, result: EvaluationResult) -> None:
             "decision": result.decision.kind,
             "matched_policy_id": result.decision.matched_policy_id,
             "matched_rule_id": result.decision.matched_rule_id,
-            "reason": result.decision.reason,
         },
     )
 
@@ -220,7 +218,6 @@ async def bundle_from_decision_card(card: dict[str, Any]) -> PolicyBundle:
         payload={
             "bundle_id": bundle.bundle_id,
             "policy_count": len(bundle.policies),
-            "source": bundle.source,
         },
     )
     return bundle

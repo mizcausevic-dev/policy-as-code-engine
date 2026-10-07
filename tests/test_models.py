@@ -36,6 +36,10 @@ class TestFieldMatcher:
         with pytest.raises(ValidationError):
             FieldMatcher(kind="eq", field="x")
 
+    def test_invalid_regex_is_rejected_at_validation(self) -> None:
+        with pytest.raises(ValidationError, match="invalid regex"):
+            FieldMatcher(kind="regex", field="x", value="[")
+
 
 class TestCompositeMatchers:
     def test_all_of_requires_children(self) -> None:
@@ -123,3 +127,8 @@ class TestEvaluationContext:
         assert ctx.lookup("subject.role") == "admin"
         assert ctx.lookup("action") == "read"
         assert ctx.lookup("resource.id") == "doc-42"
+
+    def test_lookup_escaped_path_segments(self) -> None:
+        ctx = EvaluationContext(data={"conditions_satisfied": {"risk.review": True, "risk\\review": False}})
+        assert ctx.lookup(r"conditions_satisfied.risk\.review") is True
+        assert ctx.lookup(r"conditions_satisfied.risk\\review") is False

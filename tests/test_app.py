@@ -195,6 +195,24 @@ class TestDecisionCardBridge:
         r = client.post("/bundles/from-decision-card", json={"decision_id": "x"})
         assert r.status_code == 400
 
+    def test_invalid_card_types_return_400(self, client: TestClient) -> None:
+        r = client.post("/bundles/from-decision-card", json=_decision_card(decision=None))
+        assert r.status_code == 400
+
+    def test_invalid_effective_window_returns_400(self, client: TestClient) -> None:
+        r = client.post(
+            "/bundles/from-decision-card",
+            json=_decision_card(decision={"status": "approved", "effective_until": "not-a-date"}),
+        )
+        assert r.status_code == 400
+
+    def test_newer_card_version_returns_400(self, client: TestClient) -> None:
+        r = client.post(
+            "/bundles/from-decision-card",
+            json=_decision_card(decision_card_version="0.2", data_vault_targets=[{"id": "x"}]),
+        )
+        assert r.status_code == 400
+
 
 class TestAuditStreamWiring:
     """The four endpoints that emit governance events must do so when
@@ -228,6 +246,7 @@ class TestAuditStreamWiring:
         assert evt["source"] == "policy-as-code-engine"
         assert evt["payload"]["bundle_id"] == "audit-reg"
         assert evt["payload"]["policy_count"] == 1
+        assert "source" not in evt["payload"]
 
     def test_evaluate_allow_emits_request_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         c, captured = self._emit_capture(monkeypatch)
@@ -246,7 +265,8 @@ class TestAuditStreamWiring:
             assert r.status_code == 200
         finally:
             c.__exit__(None, None, None)
-        assert any(e["kind"] == "request_allowed" for e in captured)
+        allowed = next(e for e in captured if e["kind"] == "request_allowed")
+        assert "reason" not in allowed["payload"]
 
     def test_evaluate_deny_emits_request_denied(self, monkeypatch: pytest.MonkeyPatch) -> None:
         c, captured = self._emit_capture(monkeypatch)

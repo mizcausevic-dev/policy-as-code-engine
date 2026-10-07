@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Declarative policy-as-code evaluator for Python services.** JSON/YAML rules → first-match-wins evaluation → structured allow/deny decision with the matching rule and the reason. Cheap to embed; ships with a FastAPI surface; **pairs directly with [`procurement-decision-api`](https://github.com/mizcausevic-dev/procurement-decision-api)** so the same Decision Card that records a buyer's posture also becomes the runtime gate that enforces it.
+**Declarative policy-as-code evaluator for Python services.** JSON/YAML rules → first-match-wins evaluation → structured allow/deny decision with the matching rule and the reason. It can convert fields from a [`procurement-decision-api`](https://github.com/mizcausevic-dev/procurement-decision-api) Decision Card into a candidate runtime policy bundle. The caller must verify the card's authority and supply trustworthy condition signals before using that bundle to gate requests.
 
 ---
 
@@ -13,8 +13,8 @@
 Most policy engines either ask you to learn a DSL (Rego, Cedar) or hand you a dictionary-of-lambdas and call it a library. Neither is the right shape when the *source of truth* is a JSON document a human signed off on. This engine:
 
 1. **Reads JSON/YAML bundles.** No DSL. The matcher tree is the policy.
-2. **Returns *why*, not just *what*.** Every decision carries the matched policy + rule + reason. Operators get a real audit log on each evaluation.
-3. **Bridges to the Kinetic Gain Protocol Suite.** A single endpoint turns an AI Procurement Decision Card into a runtime-enforceable `PolicyBundle` — approve, reject, or approve-with-conditions all map to concrete allow/deny logic.
+2. **Returns *why*, not just *what*.** Every decision carries the matched policy + rule + reason. The library does not persist an audit log; optional outbound audit events are best effort.
+3. **Bridges to the Kinetic Gain Protocol Suite.** A single endpoint maps an AI Procurement Decision Card's status and conditions to a `PolicyBundle`. This conversion does not authenticate the card or independently verify the conditions.
 
 ---
 
@@ -26,7 +26,7 @@ pip install policy-as-code-engine
 pip install "policy-as-code-engine[api]"
 ```
 
-Python 3.11+. Runtime deps: `pydantic` + `PyYAML`.
+Python 3.11+. Runtime deps: `pydantic`, `PyYAML`, and `httpx`.
 
 ---
 
@@ -72,7 +72,7 @@ print(result.decision.matched_rule_id)  # "admin-writes"
 print(result.decision.reason)           # "matched rule 'admin-writes'"
 ```
 
-`result.policy_decisions` carries every per-policy outcome — drop it straight into your audit log.
+`result.policy_decisions` carries every per-policy outcome. Callers that need durable audit records must persist them in their own trusted system.
 
 ---
 
@@ -111,7 +111,7 @@ resource.tags.0          # list index
 data.conditions_satisfied.dpa-signed
 ```
 
-Missing segments produce a `_MISSING` sentinel — `exists` / `missing` matchers see it; every other matcher returns `false`.
+Missing segments produce a `_MISSING` sentinel — `exists` / `missing` matchers see it; every other matcher returns `false`. Escape a literal dot or backslash in a key with a backslash, for example `conditions_satisfied.risk\.review`.
 
 ---
 
@@ -119,7 +119,7 @@ Missing segments produce a `_MISSING` sentinel — `exists` / `missing` matchers
 
 ```bash
 pip install "policy-as-code-engine[api]"
-python -m policy_as_code_engine     # binds 0.0.0.0:8089 by default
+python -m policy_as_code_engine     # binds 127.0.0.1:8089 by default
 ```
 
 | Method | Path | What it does |
@@ -137,7 +137,7 @@ python -m policy_as_code_engine     # binds 0.0.0.0:8089 by default
 
 ## The cross-ecosystem hook
 
-The headline feature. An AI Procurement Decision Card is the buyer-side record that says "we evaluated this vendor and our position is X." This engine turns that human-authored artifact into a runtime gate, mechanically.
+An AI Procurement Decision Card records a buyer's posture toward a vendor. This bridge maps its status and condition IDs into policy rules. It accepts a version `0.1` card object only and rejects newer versions and unknown top-level or `decision` fields. It does not validate the full upstream schema. The current procurement API returns `{ "draft": ..., "documents_fetched": ..., "fetch_errors": ..., "suggested_status": ... }`. Its `draft` remains pending, and `suggested_status` is advisory. Pass the inner card only after human review, an authorized status change, and authority checks.
 
 ```bash
 curl -X POST http://localhost:8089/bundles/from-decision-card \
@@ -149,11 +149,11 @@ Mapping:
 
 | Decision Card status | Resulting bundle |
 | --- | --- |
-| `approved` | Single `allow-all` policy. |
+| `approved` | Single `allow-all` policy within this bundle. This is not general authorization for every action or resource. |
 | `rejected` · `rejected-with-remediation` · `withdrawn` · `expired` · `pending` | Single `deny-all` policy (fail safe). |
-| `approved-with-conditions` | One policy *per* condition. Each policy `allow`s only when `conditions_satisfied.{condition_id}` is `true` in the evaluation context; `deny` otherwise. The bundle combiner does deny-trumps-allow, so **every** condition must be satisfied to allow. |
+| `approved-with-conditions` | One policy *per* condition. Each policy `allow`s only when `conditions_satisfied.{condition_id}` is the boolean `true` in the evaluation context; `deny` otherwise. The bundle combiner does deny-trumps-allow, so **every** condition must be satisfied to allow. |
 
-Wire your own satisfaction signal — DPA verifier, bias-audit freshness check, attestation timestamp — into the context, and the bundle does the rest.
+The caller must derive satisfaction signals from trusted checks, such as a DPA verifier or an attestation freshness check. A caller that can freely set these booleans can bypass the conditions. The bridge rejects duplicate condition IDs and preserves literal dots and backslashes in IDs. The evaluator checks `decision.effective_from` and `decision.effective_until` against its own UTC clock on every evaluation. These optional fields must use timezone-qualified RFC 3339 timestamps such as `2026-10-07T12:00:00Z`; invalid or offset-free values are rejected at conversion.
 
 ```python
 from policy_as_code_engine import (
@@ -162,7 +162,8 @@ from policy_as_code_engine import (
     policy_bundle_from_decision_card,
 )
 
-card = {...}  # POST /decisions/draft output from procurement-decision-api
+draft_response = {...}  # parsed POST /decisions/draft response from procurement-decision-api
+card = draft_response["draft"]  # review and authenticate before conversion
 bundle = policy_bundle_from_decision_card(card)
 
 ctx = EvaluationContext(
@@ -178,6 +179,12 @@ ctx = EvaluationContext(
 
 decision = PolicyEvaluator().evaluate(bundle, ctx).decision
 ```
+
+### Production boundary
+
+The HTTP API has no authentication or authorization and keeps bundles only in process memory. It is intended for local evaluation and binds to `127.0.0.1` when started with `python -m policy_as_code_engine`. A deployment that exposes the ASGI app or sets `HOST=0.0.0.0` must add authenticated, authorized access and request limits at its boundary. The bridge does not verify signatures, issuer authority, publication state, vendor/resource identity, or later revocation. Decision Card `scope` is free text and is not applied as an action/resource rule. Callers must select a bundle for the intended vendor and resource, then combine its result with a separate action/resource authorization policy. An `approved` card must not be used as the sole allow rule for production requests. Registration overwrites a bundle with the same ID, and restarts erase registered bundles.
+
+When `AUDIT_STREAM_URL` is configured, registration and allow/deny events are posted synchronously and best effort. Free-text reasons and bundle sources are excluded from these outbound events; IDs may still be sensitive in some deployments. Failed delivery is not retried or durably queued and can add up to the configured timeout to a request. Use a trusted local audit path and a separate persistence design when audit completeness matters.
 
 ---
 
@@ -211,8 +218,8 @@ Per-policy decisions are always returned — useful for "we denied because of po
 
 ```bash
 pip install -e ".[dev]"
-ruff check src tests && ruff format --check src tests
-mypy src
+ruff check src tests scripts && ruff format --check src tests scripts
+mypy src scripts
 pytest -v
 ```
 

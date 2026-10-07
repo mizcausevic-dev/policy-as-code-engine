@@ -36,6 +36,24 @@ from .models import (
 _REJECT_STATUSES = {"rejected", "rejected-with-remediation", "withdrawn", "expired"}
 _APPROVE_STATUSES = {"approved"}
 _CONDITIONAL_STATUSES = {"approved-with-conditions"}
+_CARD_V01_FIELDS = {
+    "decision_card_version",
+    "decision_id",
+    "issued_at",
+    "buyer",
+    "decision_maker",
+    "decision",
+    "subject",
+    "criteria",
+    "conditions",
+    "rationale",
+    "history",
+    "appeals",
+    "publication",
+    "signatures",
+    "withdrawal",
+}
+_DECISION_V01_FIELDS = {"status", "effective_from", "effective_until", "scope"}
 
 
 def policy_bundle_from_decision_card(card: dict[str, Any]) -> PolicyBundle:
@@ -49,28 +67,49 @@ def policy_bundle_from_decision_card(card: dict[str, Any]) -> PolicyBundle:
     """
     _validate_minimal_shape(card)
     decision_id = card["decision_id"]
-    status = card["decision"]["status"]
+    decision = card["decision"]
+    status = decision["status"]
     vendor = card["subject"]["vendor_name"]
     conditions = card.get("conditions") or []
     source = f"decision-card:{decision_id}"
+    effective_from = decision.get("effective_from")
+    effective_until = decision.get("effective_until")
 
     if status in _REJECT_STATUSES:
-        return _bundle(decision_id, source, [_deny_all_policy(decision_id, status, vendor)])
+        return _bundle(
+            decision_id,
+            source,
+            [_deny_all_policy(decision_id, status, vendor)],
+            effective_from,
+            effective_until,
+        )
 
     if status in _APPROVE_STATUSES:
-        return _bundle(decision_id, source, [_allow_all_policy(decision_id, vendor)])
+        if conditions:
+            raise ValueError("approved cards with conditions must use approved-with-conditions")
+        return _bundle(
+            decision_id, source, [_allow_all_policy(decision_id, vendor)], effective_from, effective_until
+        )
 
     if status in _CONDITIONAL_STATUSES:
         if not conditions:
             # The card itself should have failed validation upstream, but be
             # defensive: an approved-with-conditions card with no conditions
             # is treated as deny-all to fail safe.
-            return _bundle(decision_id, source, [_deny_all_policy(decision_id, status, vendor)])
+            return _bundle(
+                decision_id,
+                source,
+                [_deny_all_policy(decision_id, status, vendor)],
+                effective_from,
+                effective_until,
+            )
         policies = [_condition_policy(decision_id, c) for c in conditions]
-        return _bundle(decision_id, source, policies)
+        return _bundle(decision_id, source, policies, effective_from, effective_until)
 
     # Any unknown / pending status: fail safe.
-    return _bundle(decision_id, source, [_deny_all_policy(decision_id, status, vendor)])
+    return _bundle(
+        decision_id, source, [_deny_all_policy(decision_id, status, vendor)], effective_from, effective_until
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -78,13 +117,23 @@ def policy_bundle_from_decision_card(card: dict[str, Any]) -> PolicyBundle:
 # ---------------------------------------------------------------------------
 
 
-def _bundle(decision_id: str, source: str, policies: list[Policy]) -> PolicyBundle:
-    return PolicyBundle(
-        bundle_id=f"decision-card-{decision_id}",
-        version="0.1.0",
-        description=f"Generated from Decision Card {decision_id!r}.",
-        source=source,
-        policies=policies,
+def _bundle(
+    decision_id: str,
+    source: str,
+    policies: list[Policy],
+    effective_from: str | None,
+    effective_until: str | None,
+) -> PolicyBundle:
+    return PolicyBundle.model_validate(
+        {
+            "bundle_id": f"decision-card-{decision_id}",
+            "version": "0.1.0",
+            "description": f"Generated from Decision Card {decision_id!r}.",
+            "source": source,
+            "effective_from": effective_from,
+            "effective_until": effective_until,
+            "policies": policies,
+        }
     )
 
 
@@ -142,7 +191,7 @@ def _condition_policy(decision_id: str, condition: dict[str, Any]) -> Policy:
                 effect="allow",
                 when=FieldMatcher(
                     kind="eq",
-                    field=f"conditions_satisfied.{cid}",
+                    field="conditions_satisfied." + _escape_path_segment(cid),
                     value=True,
                 ),
                 description=description,
@@ -152,11 +201,50 @@ def _condition_policy(decision_id: str, condition: dict[str, Any]) -> Policy:
     )
 
 
+def _escape_path_segment(segment: str) -> str:
+    return segment.replace("\\", "\\\\").replace(".", "\\.")
+
+
 def _validate_minimal_shape(card: dict[str, Any]) -> None:
     for k in ("decision_id", "decision", "subject"):
         if k not in card:
             raise ValueError(f"Decision Card is missing required key {k!r}")
-    if "status" not in card["decision"]:
+    if not isinstance(card["decision_id"], str) or not card["decision_id"].strip():
+        raise ValueError("Decision Card.decision_id must be a non-empty string")
+    decision = card["decision"]
+    if not isinstance(decision, dict):
+        raise ValueError("Decision Card.decision must be an object")
+    if "status" not in decision:
         raise ValueError("Decision Card.decision is missing required key 'status'")
-    if "vendor_name" not in card["subject"]:
+    if not isinstance(decision["status"], str):
+        raise ValueError("Decision Card.decision.status must be a string")
+    subject = card["subject"]
+    if not isinstance(subject, dict):
+        raise ValueError("Decision Card.subject must be an object")
+    if "vendor_name" not in subject:
         raise ValueError("Decision Card.subject is missing required key 'vendor_name'")
+    if not isinstance(subject["vendor_name"], str) or not subject["vendor_name"].strip():
+        raise ValueError("Decision Card.subject.vendor_name must be a non-empty string")
+    if card.get("decision_card_version") != "0.1":
+        raise ValueError("only Decision Card version 0.1 is supported")
+    unknown_fields = set(card) - _CARD_V01_FIELDS
+    if unknown_fields:
+        raise ValueError(f"unsupported Decision Card fields: {sorted(unknown_fields)}")
+    unknown_decision_fields = set(decision) - _DECISION_V01_FIELDS
+    if unknown_decision_fields:
+        raise ValueError(f"unsupported Decision Card.decision fields: {sorted(unknown_decision_fields)}")
+    conditions = card.get("conditions")
+    if conditions is None:
+        return
+    if not isinstance(conditions, list):
+        raise ValueError("Decision Card.conditions must be a list")
+    seen: set[str] = set()
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            raise ValueError("each condition must be an object")
+        cid = condition.get("id")
+        if not isinstance(cid, str) or not cid.strip():
+            raise ValueError("each condition must carry a non-empty `id`")
+        if cid in seen:
+            raise ValueError(f"duplicate condition id: {cid!r}")
+        seen.add(cid)

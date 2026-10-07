@@ -15,6 +15,7 @@ without requiring the rule author to know about the sentinel.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 from .models import (
@@ -44,6 +45,19 @@ class PolicyEvaluator:
         self._regex_cache: dict[str, re.Pattern[str]] = {}
 
     def evaluate(self, bundle: PolicyBundle, context: EvaluationContext) -> EvaluationResult:
+        now = datetime.now(UTC)
+        if bundle.effective_from is not None and now < bundle.effective_from:
+            return EvaluationResult(
+                bundle_id=bundle.bundle_id,
+                decision=Decision(kind="deny", reason="bundle is not yet effective"),
+                policy_decisions=[],
+            )
+        if bundle.effective_until is not None and now >= bundle.effective_until:
+            return EvaluationResult(
+                bundle_id=bundle.bundle_id,
+                decision=Decision(kind="deny", reason="bundle effective period has ended"),
+                policy_decisions=[],
+            )
         policy_decisions: list[Decision] = []
         for policy in bundle.policies:
             policy_decisions.append(self._evaluate_policy(policy, context))
@@ -107,11 +121,13 @@ class PolicyEvaluator:
 
     @staticmethod
     def _eq(actual: Any, expected: Any) -> bool:
+        if isinstance(actual, bool) or isinstance(expected, bool):
+            return type(actual) is bool and type(expected) is bool and actual is expected
         return bool(actual == expected)
 
     @staticmethod
     def _ne(actual: Any, expected: Any) -> bool:
-        return bool(actual != expected)
+        return not PolicyEvaluator._eq(actual, expected)
 
     @staticmethod
     def _gt(actual: Any, expected: Any) -> bool:
