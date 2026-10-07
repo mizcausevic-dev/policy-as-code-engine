@@ -144,7 +144,7 @@ POST and PUT bodies are capped at 128 KiB. Registration rejects a duplicate bund
 
 ## The cross-ecosystem hook
 
-An AI Procurement Decision Card records a buyer's posture toward a vendor. The current procurement API returns `{ "draft": ..., "documents_fetched": ..., "fetch_errors": ..., "suggested_status": ... }`. Its `draft` remains pending; `suggested_status` is advisory. A buyer review/signing system must produce a final card and a v2 `hash-attestation-rs` attestation before positive HTTP registration. This repo does not supply that approval workflow.
+An AI Procurement Decision Card records a buyer's posture toward a vendor. The current procurement API returns `{ "draft": ..., "documents_fetched": ..., "fetch_errors": ..., "document_hashes": ..., "suggested_status": ... }`. Its `draft` remains pending; `suggested_status` is advisory. A buyer review/signing system must produce a final card and a v2 `hash-attestation-rs` attestation before positive HTTP registration. This repo does not supply that approval workflow.
 
 The endpoint accepts an envelope with `card`, `attestation`, and `allowed_actions`. The card must be v0.1. For approved statuses, it must contain `buyer.id`, `subject.vendor_id`, and a timezone-qualified `decision.effective_until`. The HTTP bridge accepts only `allowed_actions: ["use"]` until the buyer card has a machine-readable signed operation scope. This local choice does not mean the buyer signed action authorization. The bridge rejects duplicate JSON object keys, non-finite numbers, unsupported card versions, and unknown top-level or relevant nested fields. It does not validate the full upstream schema.
 
