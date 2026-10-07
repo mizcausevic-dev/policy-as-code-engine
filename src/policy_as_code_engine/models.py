@@ -19,9 +19,9 @@ covers ~95% of real-world request gates without having to ship a parser.
 
 from __future__ import annotations
 
-import re
 from typing import Any, Literal
 
+import regex
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
@@ -57,7 +57,7 @@ class FieldMatcher(StrictModel):
         "starts_with",
         "ends_with",
     ]
-    field: str = Field(..., min_length=1)
+    field: str = Field(..., min_length=1, max_length=256)
     value: Any = None
 
     @model_validator(mode="after")
@@ -71,21 +71,23 @@ class FieldMatcher(StrictModel):
         if self.kind == "regex":
             if not isinstance(self.value, str):
                 raise ValueError("regex matcher requires a string pattern")
+            if len(self.value) > 256:
+                raise ValueError("regex matcher pattern exceeds 256 characters")
             try:
-                re.compile(self.value)
-            except re.error as err:
+                regex.compile(self.value)
+            except regex.error as err:
                 raise ValueError(f"invalid regex matcher pattern: {err}") from err
         return self
 
 
 class AllOfMatcher(StrictModel):
     kind: Literal["all_of"] = "all_of"
-    matchers: list[Matcher] = Field(..., min_length=1)
+    matchers: list[Matcher] = Field(..., min_length=1, max_length=32)
 
 
 class AnyOfMatcher(StrictModel):
     kind: Literal["any_of"] = "any_of"
-    matchers: list[Matcher] = Field(..., min_length=1)
+    matchers: list[Matcher] = Field(..., min_length=1, max_length=32)
 
 
 class NotMatcher(StrictModel):
@@ -114,26 +116,51 @@ NotMatcher.model_rebuild()
 
 
 class Rule(StrictModel):
-    id: str = Field(..., min_length=1)
+    id: str = Field(..., min_length=1, max_length=128)
     effect: Effect
     when: Matcher
     description: str | None = None
-    tags: list[str] | None = None
+    tags: list[str] | None = Field(default=None, max_length=32)
 
 
 class Policy(StrictModel):
     """A named ordered list of rules. First match wins."""
 
-    id: str = Field(..., min_length=1)
+    id: str = Field(..., min_length=1, max_length=128)
+    card_derived: bool = False
     description: str | None = None
     default_effect: Effect = "deny"
-    rules: list[Rule] = Field(..., min_length=1)
+    rules: list[Rule] = Field(..., min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _check_matcher_complexity(self) -> Policy:
+        for rule in self.rules:
+            stack: list[tuple[Matcher, int]] = [(rule.when, 1)]
+            nodes = 0
+            while stack:
+                matcher, depth = stack.pop()
+                nodes += 1
+                if depth > 16 or nodes > 256:
+                    raise ValueError("matcher tree exceeds depth or node limit")
+                if isinstance(matcher, (AllOfMatcher, AnyOfMatcher)):
+                    stack.extend((child, depth + 1) for child in matcher.matchers)
+                elif isinstance(matcher, NotMatcher):
+                    stack.append((matcher.matcher, depth + 1))
+        return self
+
+
+class DecisionCardScope(StrictModel):
+    """Operator-approved runtime scope, separate from the signed buyer card."""
+
+    vendor_id: str = Field(..., min_length=1, max_length=512)
+    allowed_actions: list[str] = Field(..., min_length=1, max_length=16)
+    condition_ids: list[str] = Field(default_factory=list, max_length=32)
 
 
 class PolicyBundle(StrictModel):
     """The unit a service loads at startup. Versioned."""
 
-    bundle_id: str = Field(..., min_length=1)
+    bundle_id: str = Field(..., min_length=1, max_length=128)
     version: str = "0.1.0"
     description: str | None = None
     source: str | None = Field(
@@ -142,7 +169,8 @@ class PolicyBundle(StrictModel):
     )
     effective_from: AwareDatetime | None = None
     effective_until: AwareDatetime | None = None
-    policies: list[Policy] = Field(..., min_length=1)
+    card_scope: DecisionCardScope | None = None
+    policies: list[Policy] = Field(..., min_length=1, max_length=32)
 
     @model_validator(mode="after")
     def _check_effective_window(self) -> PolicyBundle:

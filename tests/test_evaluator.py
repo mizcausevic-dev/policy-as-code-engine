@@ -310,3 +310,14 @@ class TestRegexCache:
             evaluator.evaluate(bundle, ctx)
         # The cache should contain exactly one compiled pattern.
         assert len(evaluator._regex_cache) == 1
+
+    def test_catastrophic_regex_input_denies_with_timeout(self) -> None:
+        evaluator = PolicyEvaluator()
+        bundle = _bundle(
+            Policy(
+                id="bounded",
+                rules=[_allow_when(FieldMatcher(kind="regex", field="v", value=r"(a|aa)+$"))],
+            )
+        )
+        result = evaluator.evaluate(bundle, EvaluationContext(data={"v": "a" * 4095 + "!"}))
+        assert result.decision.kind == "deny"

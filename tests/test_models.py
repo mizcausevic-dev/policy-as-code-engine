@@ -40,6 +40,10 @@ class TestFieldMatcher:
         with pytest.raises(ValidationError, match="invalid regex"):
             FieldMatcher(kind="regex", field="x", value="[")
 
+    def test_oversized_regex_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="256 characters"):
+            FieldMatcher(kind="regex", field="x", value="a" * 257)
+
 
 class TestCompositeMatchers:
     def test_all_of_requires_children(self) -> None:
@@ -69,6 +73,13 @@ class TestRuleAndPolicy:
     def test_policy_requires_at_least_one_rule(self) -> None:
         with pytest.raises(ValidationError):
             Policy(id="p", rules=[])
+
+    def test_excessive_matcher_depth_is_rejected(self) -> None:
+        matcher: dict[str, object] = {"kind": "always"}
+        for _ in range(17):
+            matcher = {"kind": "not", "matcher": matcher}
+        with pytest.raises(ValidationError, match="depth or node limit"):
+            Policy.model_validate({"id": "deep", "rules": [{"id": "r", "effect": "allow", "when": matcher}]})
 
     def test_bundle_strict_extras_rejected(self) -> None:
         with pytest.raises(ValidationError):

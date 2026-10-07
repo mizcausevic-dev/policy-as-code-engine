@@ -13,6 +13,7 @@ Event kinds this service emits:
                                 decision is "allow"
     request_denied              on the same endpoint when the bundle decision
                                 is "deny"
+    policy_condition_asserted   on a successful admin condition assertion
 
 Same opt-in pattern as procurement-decision-api.audit_stream and
 aeo-validator-service.audit_stream. Identical config envvars.
