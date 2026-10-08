@@ -497,13 +497,15 @@ class TestDecisionCardBridge:
 
 class TestAuditStreamWiring:
     """The four endpoints that emit governance events must do so when
-    AUDIT_STREAM_URL is set, and stay silent when it isn't."""
+    AUDIT_STREAM_URL and AUDIT_STREAM_TOKEN are set, and stay silent when disabled."""
 
     def _emit_capture(self, monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, list[dict[str, Any]]]:
-        monkeypatch.setenv("AUDIT_STREAM_URL", "http://audit.local")
+        monkeypatch.setenv("AUDIT_STREAM_URL", "https://audit.local")
+        monkeypatch.setenv("AUDIT_STREAM_TOKEN", "a" * 32)
         captured: list[dict[str, Any]] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers["Authorization"] == f"Bearer {'a' * 32}"
             captured.append(json.loads(request.content.decode("utf-8")))
             return httpx.Response(201, json={"event_id": len(captured)})
 
