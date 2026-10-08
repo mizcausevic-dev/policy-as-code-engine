@@ -21,6 +21,7 @@ The sink contract is aligned with procurement-decision-api.audit_stream.
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 import re
@@ -52,6 +53,7 @@ def events_url() -> str | None:
         return None
     try:
         parsed = urlsplit(raw)
+        hostname = parsed.hostname
     except ValueError:
         return None
     if (
@@ -63,6 +65,12 @@ def events_url() -> str | None:
         or parsed.fragment
     ):
         return None
+    if parsed.scheme == "http":
+        try:
+            if not ipaddress.ip_address(hostname or "").is_loopback:
+                return None
+        except ValueError:
+            return None
     path = parsed.path.rstrip("/")
     if not path.endswith("/events"):
         path += "/events"
@@ -112,6 +120,7 @@ async def emit(
             url,
             json=body,
             headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False,
             timeout=timeout_s(),
         )
         response.raise_for_status()
