@@ -193,7 +193,7 @@ The v0.2.1 source tree packages a separate `policy_as_code_engine.pilot_app:app`
 
 ### v0.2.1 changes
 
-This version adds authenticated, redirect-safe, best-effort audit delivery and packages the opt-in synthetic pilot module. It does not add hosted authorization, audit completeness, or a revocation feed to the reference API. A source version string alone does not establish PyPI availability; check the tagged workflow and published artifacts before making a release claim.
+This version adds authenticated, redirect-safe, best-effort audit delivery and packages the opt-in synthetic pilot module. If you already set `AUDIT_STREAM_URL`, configure the sink to require a separate bearer credential and set `AUDIT_STREAM_TOKEN` before upgrading. Without a valid token, audit delivery fails and is logged, while policy evaluation continues because delivery is best effort. This version does not add hosted authorization, audit completeness, or a revocation feed to the reference API. A source version string alone does not establish PyPI availability; check the tagged workflow and published artifacts before making a release claim.
 
 ### Migrating from 0.1.1 to 0.2.0
 
