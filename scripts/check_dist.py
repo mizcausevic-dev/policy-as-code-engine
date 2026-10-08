@@ -5,10 +5,11 @@ from __future__ import annotations
 import tarfile
 import zipfile
 from pathlib import Path
+from sys import argv
 
 
 def main() -> None:
-    dist = Path("dist")
+    dist = Path(argv[1]) if len(argv) == 2 else Path("dist")
     sdists = list(dist.glob("*.tar.gz"))
     wheels = list(dist.glob("*.whl"))
     if len(sdists) != 1 or len(wheels) != 1:
@@ -20,11 +21,13 @@ def main() -> None:
         raise SystemExit("sdist has an invalid archive path")
     allowed_root = {".gitignore", "LICENSE", "README.md", "pyproject.toml", "PKG-INFO"}
     allowed_examples = {"examples/example-bundle.yaml", "examples/example-context.json"}
+    allowed_docs = {"docs/SYNTHETIC_PILOT.md"}
     unexpected_sdist = [
         name
         for name in names
         if name not in allowed_root
         and name not in allowed_examples
+        and name not in allowed_docs
         and not (
             name.startswith("src/policy_as_code_engine/")
             and (name.endswith(".py") or name.endswith("/py.typed"))
@@ -35,6 +38,10 @@ def main() -> None:
         raise SystemExit(f"unexpected sdist entries: {unexpected_sdist}")
     if "src/policy_as_code_engine/py.typed" not in names:
         raise SystemExit("sdist is missing py.typed")
+    if "src/policy_as_code_engine/pilot_app.py" not in names:
+        raise SystemExit("sdist is missing the opt-in pilot app")
+    if "docs/SYNTHETIC_PILOT.md" not in names:
+        raise SystemExit("sdist is missing the synthetic pilot guide")
 
     with zipfile.ZipFile(wheels[0]) as archive:
         wheel_names = archive.namelist()
@@ -47,6 +54,8 @@ def main() -> None:
         raise SystemExit(f"unexpected wheel entries: {unexpected_wheel}")
     if "policy_as_code_engine/py.typed" not in wheel_names:
         raise SystemExit("wheel is missing py.typed")
+    if "policy_as_code_engine/pilot_app.py" not in wheel_names:
+        raise SystemExit("wheel is missing the opt-in pilot app")
     print(f"distribution contents passed: {len(names)} sdist files, {len(wheel_names)} wheel files")
 
 

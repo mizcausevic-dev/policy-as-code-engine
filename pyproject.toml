@@ -70,7 +70,7 @@ Issues        = "https://github.com/mizcausevic-dev/policy-as-code-engine/issues
 packages = ["src/policy_as_code_engine"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["src", "tests", "examples", "LICENSE", "README.md"]
+only-include = ["src", "tests", "examples", "docs", "LICENSE", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
