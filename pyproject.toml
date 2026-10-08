@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "policy-as-code-engine"
-version = "0.2.0"
+version = "0.2.1"
 description = "Declarative policy evaluator with Decision Card field conversion and optional best-effort audit events."
 readme = "README.md"
 license = { text = "MIT" }

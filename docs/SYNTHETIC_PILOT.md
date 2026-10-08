@@ -1,8 +1,9 @@
 # Local synthetic policy pilot
 
-This source branch adds `policy_as_code_engine.pilot_app:app` as a separate,
-opt-in FastAPI surface. The published v0.2.0 package and its existing HTTP API
-are unchanged. **Use fictional buyers, vendors, cards, and assertions only.**
+The v0.2.1 source tree packages `policy_as_code_engine.pilot_app:app`
+as a separate, opt-in FastAPI surface. The published v0.2.0 package does not
+contain it, and the main reference HTTP API does not invoke it. **Use fictional
+buyers, vendors, cards, and assertions only.**
 The pilot is not a customer authorization service or a hosted deployment.
 
 ## What it proves locally

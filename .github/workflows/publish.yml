@@ -45,15 +45,11 @@ jobs:
           mypy src scripts
           pytest -q
 
-  publish:
-    name: Build + publish wheel + sdist
+  build:
+    name: Build and verify wheel + sdist
     needs: verify
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/policy-as-code-engine
     permissions:
-      id-token: write
       contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -72,6 +68,45 @@ jobs:
         run: |
           python -m twine check dist/*
           python scripts/check_dist.py
+      - name: Install and import the built wheel outside the source tree
+        run: |
+          python -m pip install --only-binary=:all: --target "$RUNNER_TEMP/policy-wheel" dist/*.whl
+          cd "$RUNNER_TEMP"
+          PYTHONPATH="$RUNNER_TEMP/policy-wheel" python - <<'PY'
+          import importlib.metadata as metadata
+          import os
+          from pathlib import Path
+
+          import policy_as_code_engine as package
+
+          target = Path(os.environ["RUNNER_TEMP"], "policy-wheel").resolve()
+          assert Path(package.__file__).resolve().is_relative_to(target)
+          assert metadata.version("policy-as-code-engine") == os.environ["GITHUB_REF_NAME"][1:]
+          PY
+      - name: Save verified distributions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish verified distributions to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/policy-as-code-engine
+    permissions:
+      actions: read
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-distributions
+          path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
