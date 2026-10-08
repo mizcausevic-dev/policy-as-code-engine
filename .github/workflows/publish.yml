@@ -82,6 +82,7 @@ jobs:
           target = Path(os.environ["RUNNER_TEMP"], "policy-wheel").resolve()
           assert Path(package.__file__).resolve().is_relative_to(target)
           assert metadata.version("policy-as-code-engine") == os.environ["GITHUB_REF_NAME"][1:]
+          assert package.__version__ == metadata.version("policy-as-code-engine")
           PY
       - name: Save verified distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
